@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no">
+    <meta charset="utf-8">
+    <title>Place Search Pagination</title>
+    <style>
+       
+
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        h1{
+            text-align: center;
+        }
+        #right-panel {
+            font-family: 'Roboto', 'sans-serif';
+            line-height: 30px;
+            padding-left: 10px;
+        }
+
+        #right-panel select,
+        #right-panel input {
+            font-size: 15px;
+        }
+
+        #right-panel select {
+            width: 100%;
+        }
+
+        #right-panel i {
+            font-size: 12px;
+        }
+
+        #right-panel {
+            font-family: Arial, Helvetica, sans-serif;
+            position: absolute;
+            right: 5px;
+            top: 45%;
+            margin-top: -195px;
+            height: 330px;
+            width: 200px;
+            padding: 5px;
+            z-index: 5;
+            border: 1px solid #999;
+            background: #fff;
+        }
+
+        h2 {
+            font-size: 22px;
+            margin: 0 0 5px 0;
+        }
+
+        ul {
+            list-style-type: none;
+            padding: 0;
+            margin: 0;
+            height: 271px;
+            width: 200px;
+            overflow-y: scroll;
+        }
+
+        li {
+            background-color: #f1f1f1;
+            padding: 10px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        li:nth-child(odd) {
+            background-color: #fcfcfc;
+        }
+
+        #more {
+            width: 100%;
+            margin: 5px 0 0 0;
+        }
+
+         #maps {
+            height: 600px;
+        }
+
+       .btns{
+            text-align: center;
+        }
+
+        .btn{
+            display: inline-block;
+            width: 108px;
+            height: 35px;
+            background-color: rgb(57, 137, 202);
+            border-radius: 19px;
+            text-align: center;
+            line-height: 35px;
+            font-weight: bold;
+            color:#fff;
+            margin-bottom: 10px;
+            cursor: pointer;
+        }
+
+        .driveBtn{
+            width: 70px;
+            height: 25px;
+            background-color: rgb(22, 172, 67);
+            text-align: center;
+            border-radius:10px;
+            font-size: 10px;
+            line-height: 25px;
+            cursor: pointer;
+            color: #fff;
+            font-weight: bold;
+        }
+
+        .btn:hover,.driveBtn:hover{
+            background-color: red;
+        }
+
+        .hidden{
+            display: none
+        }
+
+        .open{
+            display: block;
+            margin: 0 auto
+        }
+    </style>
+    
+</head>
+
+<body>
+    
+    <div id="app">
+        <h1>塞選方式</h1>
+            <div class="btn open" @click="openNow">營業中</div>
+        <h1>排列方式</h1>
+        <div class="btns">
+            <div class="btn" @click="rankSort">評分高到低</div>
+            <div class="btn" @click="distanSort">距離近到遠</div>
+        </div>
+        <div id="maps"></div>
+        <div id="right-panel">
+            <h2>Results</h2>
+            <div class="hidden">{{clickme}}</div>
+            <ul id="places">
+                <li v-for="result in results">{{result.name}}
+                    <br>評分:{{result.rating}}
+                    <br><span v-if="result.hasOwnProperty('opening_hours')&&result.opening_hours.open_now">營業中</span>
+                   <span v-else>已打烊</span>
+                   <div class="driveBtn"  @click="routePlan(result)">開車路線</div>
+                </li>
+            </ul>
+            <button id="more" @click="moreData">More results</button>
+        </div>
+    </div>
+   
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCVt8RETAJRIysvLljKMPTu1-S28ZDSgf8&libraries=places"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/2.6.10/vue.min.js"></script>
+    <script>
+         const googleMap = new Vue({
+                el: '#app',
+                data: {
+                    map: null,
+                    getNextPage:null,
+                    pyrmont:{},
+                    results:null,
+                    clickme:0,
+                    directionsService: null,
+                    directionsDisplay: null
+                },
+                methods: {
+                    getPeoplePosition(){
+                         //取得使用者位置
+                        var promiseObj = new Promise((resolve, reject)=> {
+                            console.log(this)
+                            let _this = this;
+                            if (navigator.geolocation) {
+                                function error() {
+                                    alert('無法取得你的位置');
+                                }
+                                function success(position) {
+                                    _this.pyrmont.lat = position.coords.latitude;
+                                    _this.pyrmont.lng = position.coords.longitude;
+                                    resolve(_this.pyrmont)
+                                }
+                            } else {
+                                alert('你的裝置不支援地理位置功能。')
+                            }
+                            navigator.geolocation.getCurrentPosition(success, error);
+                        });
+                        return promiseObj;
+                    },
+                    initMap() {
+                        // init google map
+                         this.map = new google.maps.Map(document.getElementById('maps'), {
+                            center: this.pyrmont,
+                        });
+                 
+                          let marker = new google.maps.Marker({
+                            position: this.pyrmont,
+                            map:  this.map,
+                        });
+                        this.map.addListener('zoom_changed',()=>{
+                            this.shuffle(this.results);
+                            this.clickme++;
+                        });
+                    
+               
+                    },
+                    searchPlace(){
+                        // 查找以使用者為中心的範圍餐廳
+                        let service = new google.maps.places.PlacesService(this.map);
+                        let moreButton = document.getElementById('more');
+                        
+                        service.nearbySearch(
+                            { location: this.pyrmont, radius:2000, type: ['restaurant'] },
+                            (results, status, pagination) => {
+                                if (status !== 'OK') return;
+
+                                this.results=results;
+                                
+                                let bounds = new google.maps.LatLngBounds();
+                                
+                                for (var i = 0, place; place = this.results[i]; i++) {
+
+                                    var image = {
+                                        url: place.icon,
+                                        size: new google.maps.Size(71, 71),
+                                        origin: new google.maps.Point(0, 0),
+                                        anchor: new google.maps.Point(17, 34),
+                                        scaledSize: new google.maps.Size(25, 25)
+                                    };
+                                    
+                                    var marker = new google.maps.Marker({
+                                        icon: image,
+                                        title: place.name,
+                                        position: place.geometry.location,
+                                        map:this.map
+                                    });
+
+                                    bounds.extend(place.geometry.location);
+                                    let distanResult= this.getDistance(place.geometry.location.lat(), place.geometry.location.lng(), this.pyrmont.lat, this.pyrmont.lng);
+                                    this.results[i].distance= distanResult;
+                                }
+                                this.map.fitBounds(bounds);
+                               
+                                moreButton.disabled = !pagination.hasNextPage;
+                                this.getNextPage = pagination.hasNextPage && function () {
+                                    pagination.nextPage();
+                                };
+                            });
+
+                    },
+                    moreData(e){
+                        //取得其他餐廳
+                        e.target.disabled = true;
+                         if (this.getNextPage) this.getNextPage();
+                    },
+                    rankSort(e){
+                        //評分由高到低排名
+                        this.results.sort(function(a,b){
+                            return b.rating-a.rating
+                        });
+                    },
+                    distanSort(e){
+                        //距離由近到遠排名
+                        this.results.sort(function (a, b) {
+                            return a.distance - b.distance
+                        });
+                    },
+                    getDistance(lat1, lng1, lat2, lng2){
+                        //算出每家餐廳到使用者所在位置的距離
+                        let radLat1 = lat1 * Math.PI / 180.0;
+                        let radLat2 = lat2 * Math.PI / 180.0;
+                        let a = radLat1 - radLat2;
+                        let b = lng1 * Math.PI / 180.0 - lng2 * Math.PI / 180.0;
+                        let s = 2 * Math.asin(Math.sqrt(Math.pow(Math.sin(a / 2), 2) +
+                            Math.cos(radLat1) * Math.cos(radLat2) * Math.pow(Math.sin(b / 2), 2)));
+                        s = s * 6378.137;
+                        s = Math.round(s * 10000) / 10000;
+                        return s;
+                    },
+                    shuffle(arr){
+                        //重新排陣列
+                        var i,j,temp;
+                        for (i = arr.length - 1; i > 0; i--) {
+                            j = Math.floor(Math.random() * (i - 1));
+                            temp = arr[i];
+                            arr[i] = arr[j];
+                            arr[j] = temp;
+                        }
+                        return arr;
+                    },
+                    openNow(){
+                        //從原陣列挑選出正在營業的餐廳
+                       this.results=this.results.filter(function(item,index){
+                           if(item.hasOwnProperty('opening_hours')){
+                                return item.opening_hours.open_now
+                           }
+                       });
+                    },
+                    routePlan(result){
+                        //規劃開車路線
+
+                        //刪除原有路線紀錄
+                        if (this.directionsDisplay != null) {
+                            this.directionsDisplay.set('directions', null);
+                            this.directionsDisplay = null;
+                        }
+
+                        let latPlan=result.geometry.location.lat();
+                        let lngPlan=result.geometry.location.lng();
+                        //console.log(latPlan,lngPlan)
+                        this.directionsService = new google.maps.DirectionsService();
+                        this.directionsDisplay= new google.maps.DirectionsRenderer();
+                      
+                        // 放置路線圖層
+                        this.directionsDisplay.setMap(this.map);
+                       
+                            // 路線相關設定
+                        const request = {
+                            origin: this.pyrmont,
+                            destination: { lat: latPlan, lng:lngPlan },
+                            travelMode: 'DRIVING'
+                        };
+
+                        // 繪製路線
+                        this.directionsService.route(request, (result, status) => {
+                            if (status == 'OK') {
+                                // 回傳路線上每個步驟的細節
+                                // console.log(result);
+                                this.directionsDisplay.setDirections(result);
+                            } else {
+                                console.log(status);
+                            }
+                        });
+                        
+                    }
+                     
+                },
+                mounted() {
+                    window.addEventListener('load', () => {
+                        this.getPeoplePosition().then((data)=>{
+                            this.initMap();
+                            this.searchPlace();
+                        }); 
+                    });
+                    
+                }
+            }) 
+    </script>
+        
+</body>
+
+</html>
